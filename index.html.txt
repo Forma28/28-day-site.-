@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>28-Day — Трансформация тела</title>
+</head>
+<body style="font-family: sans-serif; background: #f8f9fa; color: #333; padding: 20px;">
+  <h1>28-Day Challenge 💪</h1>
+  <p>Готов сбросить до 10 кг за 28 дней с поддержкой AI и персональным планом?</p>
+  <ul>
+    <li>📋 Индивидуальный план питания</li>
+    <li>🏋️ Программа тренировок</li>
+    <li>🤖 Поддержка от AI 24/7</li>
+    <li>💬 Telegram-бот и мотивация</li>
+  </ul>
+  <h3>💰 Тарифы:</h3>
+  <ul>
+    <li><strong>Lite</strong> — 25 USDT</li>
+    <li><strong>Premium</strong> — 49 USDT</li>
+    <li><strong>VIP</strong> — 99 USDT</li>
+  </ul>
+  <h3>🔗 Оплата в криптовалюте:</h3>
+  <ul>
+    <li>USDT TRC20: <code>TE1qXAiYxqXXXXXEXAMPLExxxx</code></li>
+    <li>BTC: <code>bc1qexamplexxxxxxxxx</code></li>
+    <li>ETH: <code>0xExampleWalletAddress</code></li>
+    <li>TON: <code>UQDrtQlNq2-wV0XXDzZPaePIlCv3K6QEZec_5Y_Yw8MeA7Yw</code></li>
+  </ul>
+  <a href="https://t.me/Day28_AI_Bot" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#007bff;color:#fff;text-decoration:none;border-radius:6px;">Оставить заявку</a>
+</body>
+</html>
