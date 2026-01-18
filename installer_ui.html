@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>ProgressFit X — Admin</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 2rem auto;
+      max-width: 760px;
+      padding: 0 1.5rem 3rem;
+      line-height: 1.6;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.25rem;
+    }
+    section {
+      border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-top: 1.25rem;
+      background: rgba(240,240,240,0.3);
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 999px;
+      border: none;
+      padding: 0.5rem 1.2rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin: 0.25rem 0.5rem 0.25rem 0;
+      background: #2563eb;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+    }
+    button.secondary {
+      background: #1f2937;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: progress;
+      box-shadow: none;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(15,23,42,0.85);
+      color: #f8fafc;
+      padding: 1rem;
+      border-radius: 10px;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      max-height: 360px;
+      overflow: auto;
+    }
+    small {
+      display: block;
+      opacity: 0.75;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ProgressFit X — панель администратора</h1>
+    <p>Используйте быстрые действия, чтобы проверить бота, переустановить листы, обновить вебхук и собрать свежую статистику.</p>
+  </header>
+
+  <section>
+    <h2>Диагностика</h2>
+    <p>Проверяет вебхук, наличие листов и активные триггеры.</p>
+    <button onclick="run('apiDiagnostics', this)">Запустить проверку</button>
+    <pre id="diagnostics"></pre>
+  </section>
+
+  <section>
+    <h2>Авто-настройка</h2>
+    <p>Создаёт листы, обновляет вебхук и расписание триггеров. Запускайте при первом деплое или если что-то пошло не так.</p>
+    <button onclick="run('apiAutoFix', this)">Исправить автоматически</button>
+    <pre id="autofix"></pre>
+  </section>
+
+  <section>
+    <h2>Вебхук</h2>
+    <p>Ручное управление регистрацией вебхука Telegram.</p>
+    <button class="secondary" onclick="run('apiSetWebhook', this)">Установить вебхук</button>
+    <button class="secondary" onclick="run('apiDeleteWebhook', this)">Удалить вебхук</button>
+    <pre id="webhook"></pre>
+  </section>
+
+  <section>
+    <h2>Тест и статистика</h2>
+    <p>Отправьте себе тестовое сообщение и зафиксируйте недельный срез показателей.</p>
+    <button onclick="run('apiSelfTest', this)">Self-test</button>
+    <button onclick="run('apiSnapshot', this)">Сделать срез</button>
+    <button onclick="run('apiGetMetrics', this)">Последние метрики</button>
+    <pre id="metrics"></pre>
+  </section>
+
+  <script>
+    function run(name, button) {
+      const target = document.getElementById(getTarget(name));
+      if (!google || !google.script || !google.script.run) {
+        target.textContent = 'google.script.run недоступен. Откройте панель из Apps Script.';
+        return;
+      }
+      button.disabled = true;
+      target.textContent = 'Выполняю ' + name + '…';
+      google.script.run.withSuccessHandler(function (data) {
+        button.disabled = false;
+        target.textContent = JSON.stringify(data, null, 2);
+      }).withFailureHandler(function (err) {
+        button.disabled = false;
+        target.textContent = 'Ошибка: ' + err.message;
+      })[name]();
+    }
+
+    function getTarget(name) {
+      switch (name) {
+        case 'apiDiagnostics':
+          return 'diagnostics';
+        case 'apiAutoFix':
+          return 'autofix';
+        case 'apiSetWebhook':
+        case 'apiDeleteWebhook':
+          return 'webhook';
+        case 'apiSelfTest':
+        case 'apiSnapshot':
+        case 'apiGetMetrics':
+          return 'metrics';
+        default:
+          return 'diagnostics';
+      }
+    }
+  </script>
+</body>
+</html>

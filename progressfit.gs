@@ -1,6 +1,6 @@
 /*********************************************************
  * ProgressFit X — Telegram Bot on Google Apps Script
- * v3.6 (stable, single-file)
+ * v4.2 (admin toolkit, single-file)
  **********************************************************/
 
 var _CONFIG_CACHE = null;
@@ -17,6 +17,7 @@ function config() {
     BOT_USERNAME: '',
     SHEET_ID: '',
     ADMIN_IDS: [],
+    ADMIN_PIN: '',
     CHANNEL_LINK: 'https://t.me/your_channel',
     CHAT_LINK: 'https://t.me/your_chat',
     SUPPORT_LINK: 'https://t.me/your_support',
@@ -108,6 +109,7 @@ function config() {
     BOT_USERNAME: stringProp('BOT_USERNAME', defaults.BOT_USERNAME),
     SHEET_ID: stringProp('SHEET_ID', defaults.SHEET_ID),
     ADMIN_IDS: listProp('ADMIN_IDS', defaults.ADMIN_IDS),
+    ADMIN_PIN: stringProp('ADMIN_PIN', defaults.ADMIN_PIN),
     CHANNEL_LINK: stringProp('CHANNEL_LINK', defaults.CHANNEL_LINK),
     CHAT_LINK: stringProp('CHAT_LINK', defaults.CHAT_LINK),
     SUPPORT_LINK: stringProp('SUPPORT_LINK', defaults.SUPPORT_LINK),
@@ -207,13 +209,54 @@ function doPost(e){
   }catch(err){ logFail({type:'exception',raw:up},err); }
   return ContentService.createTextOutput('ok');
 }
-function doGet(){ try{config(); return ContentService.createTextOutput('ProgressFit X: OK');}catch(err){ return ContentService.createTextOutput('ProgressFit X: CONFIG ERROR — '+err.message); }}
+function doGet(e){
+  try {
+    config();
+  } catch (err) {
+    return ContentService.createTextOutput('ProgressFit X: CONFIG ERROR — ' + err.message);
+  }
+
+  const params = (e && e.parameter) || {};
+  if (params.s) {
+    return ContentService.createTextOutput('ProgressFit X: OK');
+  }
+
+  if (params.admin === '1') {
+    const expectedPin = safe(config().ADMIN_PIN);
+    if (!expectedPin) {
+      return ContentService.createTextOutput('Admin PIN is not configured. Set ADMIN_PIN in Script Properties.');
+    }
+    const providedPin = safe(params.key || '');
+    if (providedPin !== expectedPin) {
+      return ContentService.createTextOutput('Unauthorized');
+    }
+    if (typeof HtmlService === 'undefined') {
+      return ContentService.createTextOutput('HTML service unavailable in this context.');
+    }
+    return HtmlService.createHtmlOutputFromFile('installer_ui')
+      .setTitle('ProgressFit X — Admin')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  return ContentService.createTextOutput('ProgressFit X: OK');
+}
 
 /* ====== handlers ====== */
 function onMessage(m){
   const uinfo=m.from||{}; const ctx={type:'message',user:{id:String(uinfo.id),username:uinfo.username||'',first_name:uinfo.first_name||''},chat:{id:String(m.chat.id)},text:safe(m.text||''),raw:m};
-  const u=ensureUser(ctx.user.id,ctx.user.username,ctx.user.first_name);
+  let u=ensureUser(ctx.user.id,ctx.user.username,ctx.user.first_name);
+
+  if(ctx.text && ctx.text.indexOf('/start ')===0){
+    const arg=safe(ctx.text.split(' ')[1]||'');
+    if(arg.indexOf('ref_')===0 && !safe(u.referred_by)){ u.referred_by=arg.replace('ref_',''); grantAccessDays(u,3); saveUser(u); tgsend(ctx.chat.id,'🎁 Реферал учтён: +3 дня доступа.'); }
+  }
+
   if(processStates(ctx,u)) return ContentService.createTextOutput('ok');
+
+  if(ctx.text==='/help'){ tgsend(ctx.chat.id,'Команды:\n/start — приветствие\n/plan — план на 30/45/60\n/nutrition — БЖУ и рекомендации\n/testlevel — экспресс-оценка уровня\n/injury — учёт травм\n/fridge курица, яйца — рацион из того, что есть\n/supplements — консультация по добавкам\n/pro — оформить доступ\n/status — статус\n/reset — сбросить ответы'); return ContentService.createTextOutput('ok'); }
+  if(ctx.text==='/reset'){ u.goal=''; u.level=''; u.user_state=''; u.injury_tags=''; saveUser(u); tgsend(ctx.chat.id,'Сбросил анкету. Напиши цель: fat_loss / strength / health'); return ContentService.createTextOutput('ok'); }
+  if(ctx.text.startsWith('/fridge')){ handleFridge(ctx,u); return ContentService.createTextOutput('ok'); }
+  if(ctx.text==='/supplements'){ handleSupplements(ctx,u); return ContentService.createTextOutput('ok'); }
 
   if(ctx.text.startsWith('/start')){ tgsend(ctx.chat.id,T('WELCOME')); tgsend(ctx.chat.id,T('ASK_GOAL')); return ContentService.createTextOutput('ok'); }
   if(ctx.text==='/plan'){ handlePlan(ctx,u); return ContentService.createTextOutput('ok'); }
@@ -277,6 +320,33 @@ function updateInjuryMessage(ctx,u){try{tgedit(ctx.chat.id,ctx.message_id,'От�
 function jokerAvailable(u){return Number(u.joker_tokens||0)>0;}
 function cbJoker(ctx){const u=getUser(ctx.user.id); if(!u){tgcb(ctx.cb_id,'Пользователь не найден'); return;} if(!hasAccess(u)){tgcb(ctx.cb_id,'Нужна активная подписка'); return;} if(!jokerAvailable(u)){tgcb(ctx.cb_id,'Джокеры закончились'); return;} const day=todayStr(); const existing=rows(config().PROGRESS_SHEET).find(r=>String(r.user_id)===String(u.user_id)&&String(r.date)===day); if(existing&&existing.status==='done'){tgcb(ctx.cb_id,'Сегодня уже отмечено'); return;} setProgressStatus(u.user_id,day,'joker'); u.joker_tokens=Number(u.joker_tokens||0)-1; if(u.joker_tokens<0)u.joker_tokens=0; u.last_checkin_date=day; saveUser(u); tgcb(ctx.cb_id,'Джокер сохранён'); try{tgsend(ctx.chat.id,'Береги себя. Джокер активирован, серия не обнулилась. Осталось: '+u.joker_tokens);}catch(e){logFail({type:'joker_ack',user:u},e);}}
 
+function handleFridge(ctx,u){
+  if(!hasAccess(u)){ tgsend(ctx.chat.id,T('LOCKED')+'\nСвязь: '+config().SUPPORT_LINK); const k=kbManual(); tgsend(ctx.chat.id,k.info,{reply_markup:k.markup}); return; }
+  const payload=safe(ctx.text||'');
+  const items=payload.split(/\s+/).slice(1).join(' ');
+  if(!items){ tgsend(ctx.chat.id,'Напиши: <code>/fridge курица, творог, яйца</code>'); return; }
+  const list=items.split(',').map(function(item){return safe(item).toLowerCase();}).filter(Boolean);
+  const proteinDB={ 'курица':31,'филе':31,'chicken':31,'творог':18,'cottage':18,'яйца':12,'яйцо':12,'eggs':12,'тунец':25,'tuna':25,'говядина':26,'beef':26,'индейка':29,'turkey':29,'тофу':8,'tofu':8,'сыр':25,'cheese':25,'рыба':20,'fish':20 };
+  const lines=[];
+  list.forEach(function(item){
+    const amount=proteinDB[item]||0;
+    if(amount>0){ lines.push('• '+item+' ≈ '+amount+' г/100 г'); }
+    else { lines.push('• '+item+' — добавь белок или проверь таблицу калорийности'); }
+  });
+  const weight=Number(u.weight_kg||0)||75; const target=Math.round(2*weight);
+  const text='<b>🧊 Холодильник</b>\n'+lines.join('\n')+'\n\nЦель по белку: <b>'+target+' г</b>\nСовет: если не хватает — добавь протеин, рыбу или бобовые. План в /nutrition';
+  tgsend(ctx.chat.id,text);
+}
+
+function handleSupplements(ctx,u){
+  const goal=safe(u.goal).toLowerCase();
+  let base='База: креатин 3–5 г/д, Омега-3 1–2 г EPA/DHA, витамин D 2000–4000 IU, магний 300–400 мг на ночь.';
+  if(goal==='fat_loss'){ base+=' Для жиросжигания добавь кофеин 100–200 мг перед тренировкой, L-карнитин — по желанию.'; }
+  if(goal==='strength'){ base+=' Для силы держи креатин ежедневно, можно подключить бета-аланин 3–6 г/д курсом.'; }
+  if(goal==='health'){ base+=' Для здоровья акцент на Омега-3, витамин D, магний и сон 7–9 часов.'; }
+  tgsend(ctx.chat.id,'<b>💊 Спортпит</b>\n'+base+'\nP.S. Добавки — дополнение к питанию, а не замена режима.');
+}
+
 /* ====== nutrition / status / test / injury ====== */
 function handleNutrition(ctx,u){ if(!hasAccess(u)){ tgsend(ctx.chat.id,T('LOCKED')+'\nСвязь: '+config().SUPPORT_LINK); const k=kbManual(); tgsend(ctx.chat.id,k.info,{reply_markup:k.markup}); return;} if(!u.weight_kg){ u.user_state='await_weight'; saveUser(u); tgsend(ctx.chat.id,'Введи вес (кг), например 80.'); return;} const w=Number(u.weight_kg), Pm=Math.round(2*w), Fm=Math.round(0.8*w), Cm=Math.max(0,Math.round((2000-(Pm*4+Fm*9))/4)); tgsend(ctx.chat.id,'<b>🍽 Нормы (оценочно)</b>\nБ: <b>'+Pm+' г</b>  Ж: <b>'+Fm+' г</b>  У: <b>'+Cm+' г</b>\n\nКреатин 3–5 г/д; Омега-3; Vit D; протеин — если не добираешь белок.');}
 function showStatus(ctx,u){tgsend(ctx.chat.id,'Статус: '+(hasAccess(u)?'активен ✅':'закрыт 🔒')+'\nДоступ до: '+(u.access_until||'—')+'\nPro до: '+(u.pro_until||'—')+'\nТип: '+(u.plan_type||'—')+'\nСерия: '+(u.streak_days||0));}
@@ -305,10 +375,14 @@ function install(){
     progress:['user_id','date','status'], sessions:['user_id','date','duration','type','paid','status'],
     failures:['ts','type','user_id','error','raw'], metrics_daily:['date','user_id','nps','notes']
   };
+  clearSheetCache();
   Object.keys(H).forEach(k=>ensureHeader(k,H[k]));
   if(rows('plans').length===0){
     append('plans',{plan_id:'STR-60-ADV-GYM',goal:'strength',level:'advanced',duration_min:60,title:'Комбо-день: турник + штанга',content:'Разминка 5 мин (скакалка/гребля)\n21→15→12→9: подтягивания / рывок 40 кг\nПресс 5 мин\n2 гири 32 кг — ходьба 1 мин + 20 вращений блином ×5\nГребля 5 мин макс\nЗаминка + шея',tips:'Техника > темп.',equipment:'gym',low_impact:'0',heavy:'1',avoid_tags:'back,shoulder'});
+    append('plans',{plan_id:'STR-45-GYM-VOL',goal:'strength',level:'intermediate',duration_min:45,title:'Объём: выпрыгивания + жим',content:'Разминка 5 мин\nВыпрыгивания с гирей (15–20 кг) или на тумбу — всего 100 повторений\nЖим лёжа 40 кг: 100 повторений с паузой 3с внизу\nТаймер 5 мин: максимум подтягиваний\nГантель 14 кг рывок: 5×15 на руку\nТабата: 20с планка / 10с отжимания ×8\nЗаминка 5 мин',tips:'Разбей объём на подходы, не гори.',equipment:'gym',low_impact:'0',heavy:'1',avoid_tags:'shoulder'});
     append('plans',{plan_id:'HLT-30-ALL-MOB',goal:'health',level:'beginner',duration_min:30,title:'Щадящий день восстановления',content:'Разминка 5 мин\n3 круга: присед 15×, планка 30с, мост 15×, планка локти 30с\nРастяжка и дыхание',tips:'Меньше героизма — больше системности.',equipment:'none',low_impact:'1',heavy:'0',avoid_tags:'knee'});
+    append('plans',{plan_id:'HLT-30-RECOVERY',goal:'health',level:'all',duration_min:30,title:'Восстановительный микс',content:'Разминка 5 мин\n5 кругов: 12 приседов, 10 гудморнинг с резиной, 30с планка, 12 ягодичный мост\nРастяжка + дыхание 5 мин',tips:'Не спеши — цель восстановление.',equipment:'none',low_impact:'1',heavy:'0',avoid_tags:'knee,back'});
+    append('plans',{plan_id:'END-45-HIIT',goal:'fat_loss',level:'intermediate',duration_min:45,title:'HIIT + кор',content:'Разминка 5 мин\nКруг ×4: 20 берпи, 15 приседаний с прыжком, 20 секунд гребли, 15 V-up\nФиниш: планка 3×60 с паузой 30с\nЗаминка 5 мин',tips:'Следи за пульсом и техникой.',equipment:'none',low_impact:'0',heavy:'0',avoid_tags:'knee'});
   }
   return 'OK';
 }
@@ -320,3 +394,91 @@ function morningPrompt(){const users=rows(config().USERS_SHEET); users.filter(u=
 function proExpiryHint(){const users=rows(config().USERS_SHEET); const base=parseISODate(todayStr())||new Date(); const tomorrow=new Date(base.getTime()); tomorrow.setDate(tomorrow.getDate()+1); users.filter(u=>safe(u.plan_type)==='pro').forEach(u=>{const proUntil=parseISODate(u.pro_until); if(isSameDay(proUntil,tomorrow)){try{tgsend(String(u.user_id),'⚠️ Pro заканчивается завтра. Продлим? /pro');}catch(e){logFail({type:'pro_expiry_hint',user:u},e);}}});}
 function nightlyExpire(){const users=rows(config().USERS_SHEET); const today=parseISODate(todayStr())||new Date(); users.forEach(u=>{const access=parseISODate(u.access_until); const pro=parseISODate(u.pro_until); let updated=false; if(isBeforeDay(access,today)&&safe(u.plan_type)!=='pro'){u.plan_type=''; updated=true;} if(isBeforeDay(pro,today)&&safe(u.plan_type)==='pro'){u.plan_type=''; updated=true; try{tgsend(String(u.user_id),'Lite/Pro закончился. Вернёмся? /pro');}catch(e){logFail({type:'expire_notify',user:u},e);}} if(updated){saveUser(u);}});}
 function weeklyJokerRefill(){const users=rows(config().USERS_SHEET); users.forEach(u=>{const tokens=Number(u.joker_tokens||0); const cap=Math.min(tokens+1,3); if(cap!==tokens){u.joker_tokens=cap; saveUser(u); if(hasAccess(u)){try{tgsend(String(u.user_id),'🃏 Джокеры пополнены: '+cap);}catch(e){logFail({type:'joker_notify',user:u},e);}}}});}
+
+/* ====== admin API ====== */
+function apiDiagnostics(){
+  const result={now:new Date(),execUrl:null,webhook:null,sheets:null,triggers:[]};
+  try{result.execUrl=ScriptApp.getService().getUrl();}catch(err){result.execUrlError=String(err);}
+
+  try{
+    const token=safe(config().BOT_TOKEN);
+    if(!token){result.webhook={error:'BOT_TOKEN not configured'};} else {
+      const resp=UrlFetchApp.fetch('https://api.telegram.org/bot'+token+'/getWebhookInfo',{muteHttpExceptions:true});
+      result.webhook={status:resp.getResponseCode()};
+      try{result.webhook.data=JSON.parse(resp.getContentText()||'{}');}catch(parseErr){result.webhook.parseError=String(parseErr);}
+    }
+  }catch(err){result.webhook={error:String(err)};}
+
+  try{
+    const cfg=config();
+    const names=[cfg.USERS_SHEET,cfg.PLANS_SHEET,cfg.NUTRITION_SHEET,cfg.CONTENT_SHEET,cfg.PROGRESS_SHEET,cfg.SESSIONS_SHEET,cfg.FAILURES_SHEET,cfg.METRICS_SHEET];
+    const spreadsheet=SS();
+    result.sheets=names.map(name=>({name:name,exists:!!spreadsheet.getSheetByName(name)}));
+  }catch(err){result.sheetsError=String(err);}
+
+  try{
+    result.triggers=ScriptApp.getProjectTriggers().map(function(trigger){return {handler:trigger.getHandlerFunction(),description:String(trigger)};});
+  }catch(err){result.triggers=[{error:String(err)}];}
+
+  return result;
+}
+
+function apiAutoFix(){
+  const output=[];
+  function pushStep(name,fn){
+    try{output.push({name:name,result:fn()});}
+    catch(err){output.push({name:name,error:String(err)});}
+  }
+  pushStep('install',install);
+  pushStep('setWebhook',setWebhookSelf);
+  pushStep('createTriggers',createTriggers);
+  return output;
+}
+
+function apiDeleteWebhook(){
+  try{return deleteWebhook();}
+  catch(err){return 'ERROR: '+err.message;}
+}
+
+function apiSetWebhook(){
+  try{return setWebhookSelf();}
+  catch(err){return 'ERROR: '+err.message;}
+}
+
+function apiSelfTest(){
+  const admins=config().ADMIN_IDS||[];
+  if(!admins.length){return {ok:false,error:'ADMIN_IDS is empty'};}
+  try{tgsend(admins[0],'✅ Self-test: бот онлайн. Проверь команды /plan и /pro.'); return {ok:true};}
+  catch(err){return {ok:false,error:String(err)};}
+}
+
+function apiSnapshot(){
+  const cfg=config();
+  const today=todayStr();
+  const users=rows(cfg.USERS_SHEET);
+  const progress=rows(cfg.PROGRESS_SHEET);
+  const active=users.filter(u=>hasAccess(u));
+  const pros=users.filter(u=>safe(u.plan_type)==='pro' && hasAccess(u));
+  const lites=active.filter(u=>safe(u.plan_type)!=='pro');
+
+  const sevenDays=new Date();
+  sevenDays.setDate(sevenDays.getDate()-7);
+  const activeIds=new Set(active.map(u=>String(u.user_id)));
+  const workouts7=new Set(progress.filter(p=>{
+    const d=parseISODate(p.date);
+    return d && d>=sevenDays;
+  }).map(p=>String(p.user_id)));
+  const retention7=activeIds.size?Math.round(100*Array.from(activeIds).filter(function(id){return workouts7.has(id);}).length/activeIds.size):0;
+
+  const revenueWeek=lites.length*Number(cfg.LITE_PRICE_USD||0)+pros.length*Number(cfg.PRO_PRICE_USD||0);
+  append(cfg.METRICS_SHEET,{date:today,user_id:'all',nps:'',notes:JSON.stringify({total:users.length,active:active.length,pros:pros.length,lites:lites.length,revenue_week:revenueWeek,retention7:retention7})});
+  return {total:users.length,active:active.length,pros:pros.length,lites:lites.length,revenue_week:revenueWeek,retention7:retention7};
+}
+
+function apiGetMetrics(){
+  return rows(config().METRICS_SHEET).slice(-30).map(function(entry){
+    let notes={};
+    try{notes=JSON.parse(entry.notes||'{}');}catch(err){notes={parseError:String(err)};}
+    return {date:entry.date,total:notes.total||0,active:notes.active||0,pros:notes.pros||0,lites:notes.lites||0,revenue_week:notes.revenue_week||0,retention7:notes.retention7||0};
+  });
+}
